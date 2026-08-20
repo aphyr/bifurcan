@@ -14,6 +14,7 @@
              :dev     {:dependencies [;; for tests
                                       [org.clojure/clojure "1.10.0"]
                                       [org.clojure/test.check "0.10.0"]
+                                      [com.gfredericks/test.chuck "0.2.15"]
                                       [criterium "0.4.5"]
                                       [potemkin "0.4.5"]
                                       [proteus "0.1.6"]

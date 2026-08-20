@@ -1,10 +1,78 @@
 (ns bifurcan.test-utils
-  (:require
-   [clojure.test.check.generators :as gen]
-   [clojure.test.check.properties :as prop]
-   [clojure.test.check.clojure-test :as ct :refer (defspec)]))
+  (:require [clojure [datafy :refer [datafy]]]
+            [clojure.core [protocols :as protocols]
+                          [reducers :as reducers]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.clojure-test :as ct :refer (defspec)])
+  (:import (io.lacuna.bifurcan IntMap
+                               FloatMap
+                               SortedMap
+                               Map
+                               Maps
+                               List
+                               Lists
+                               Set
+                               Sets
+                               IEdge
+                               IEntry
+                               IList
+                               IGraph
+                               IMap
+                               ISet
+                               LinearList
+                               LinearMap
+                               LinearSet
+                               SortedSet)))
 
-(def iterations 1e4)
+(def iterations
+  "Number of iterations for generative tests"
+  (long 1e4))
+
+;; Coercion back to Clojure structures.
+
+(extend-protocol protocols/Datafiable
+  IList
+  (datafy [xs]
+    (mapv datafy xs))
+
+  IEntry
+  (datafy [entry]
+    (clojure.lang.MapEntry. (datafy (.key entry))
+                            (datafy (.value entry))))
+
+  IEdge
+  (datafy [edge]
+    {:from  (datafy (.from edge))
+     :to    (datafy (.to edge))
+     :value (datafy (.value edge))})
+
+  IMap
+  (datafy [s]
+    (let [iter (.iterator s)]
+      (loop [m (transient {})]
+        (if (.hasNext iter)
+          (let [kv ^IEntry (.next iter)]
+            (recur (assoc! m
+                           (datafy (.key kv))
+                           (datafy (.value kv)))))
+          (persistent! m)))))
+
+  ISet
+  (datafy [s]
+    (let [iter (.iterator s)]
+    (loop [s (transient #{})]
+      (if (.hasNext iter)
+        (recur (conj! s (datafy (.next iter))))
+        (persistent! s)))))
+
+  IGraph
+  (datafy [g]
+    (->> (.vertices g)
+         (reducers/map (fn [vertex] [(datafy vertex) (datafy (.out g vertex))]))
+         (into {}))))
+
+;; Functional wrappers
 
 (defn ->to-int-fn [f]
   (reify java.util.function.ToIntFunction

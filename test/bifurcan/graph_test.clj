@@ -198,7 +198,7 @@
         Graphs/articulationPoints
         ->set))))
 
-(defspec ^:focus merge-digraph iterations
+(defspec merge-digraph iterations
   (prop/for-all [a gen-digraph
                  b gen-digraph]
                 (= (naive-merge a b Maps/MERGE_LAST_WRITE_WINS)
