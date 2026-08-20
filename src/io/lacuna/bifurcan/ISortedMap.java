@@ -1,8 +1,6 @@
 package io.lacuna.bifurcan;
 
 import io.lacuna.bifurcan.ISortedSet.Bound;
-import io.lacuna.bifurcan.diffs.ConcatSortedMap;
-import io.lacuna.bifurcan.diffs.Slice;
 
 import java.util.Comparator;
 import java.util.OptionalLong;
@@ -43,6 +41,32 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
     return keys().ceilIndex(key, bound);
   }
 
+  /**
+   * @param min the inclusive minimum key value
+   * @param max the exclusive maximum key value
+   * @return a map representing all entries within {@code [min, max)}
+   */
+  default ISortedMap<K, V> slice(K min, K max) {
+    return slice(min, Bound.INCLUSIVE, max, Bound.EXCLUSIVE);
+  }
+
+  default ISortedMap<K, V> slice(K min, Bound minBound, K max, Bound maxBound) {
+    OptionalLong start = keys().ceilIndex(min, minBound);
+    OptionalLong end = keys().floorIndex(max, maxBound);
+    return start.isPresent() && end.isPresent()
+            ? sliceIndices(start.getAsLong(), end.getAsLong() + 1)
+            : new SortedMap<>(comparator());
+  }
+
+  /**
+   * @param startIndex The inclusive starting index
+   * @param endIndex   The exclusive ending index
+   * @return a sorted map representing all entries within {@code [startIndex, endIndex)}
+   */
+  default ISortedMap<K, V> sliceIndices(long startIndex, long endIndex) {
+    return keys().sliceIndices(startIndex, endIndex).zip(this);
+  }
+
   @Override
   default ToLongFunction<K> keyHash() {
     throw new UnsupportedOperationException("ISortedMap does not use hashes");
@@ -62,8 +86,8 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
   default OptionalLong indexOf(K key) {
     OptionalLong idx = inclusiveFloorIndex(key);
     return idx.isPresent() && comparator().compare(key, nth(idx.getAsLong()).key()) == 0
-        ? idx
-        : OptionalLong.empty();
+            ? idx
+            : OptionalLong.empty();
   }
 
   default IEntry<K, V> floor(K key) {
@@ -77,8 +101,8 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
   default IEntry<K, V> floor(K key, Bound bound) {
     OptionalLong idx = floorIndex(key, bound);
     return idx.isPresent()
-        ? nth(idx.getAsLong())
-        : null;
+            ? nth(idx.getAsLong())
+            : null;
   }
 
   default IEntry<K, V> ceil(K key) {
@@ -92,25 +116,8 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
   default IEntry<K, V> ceil(K key, Bound bound) {
     OptionalLong idx = ceilIndex(key, bound);
     return idx.isPresent()
-        ? nth(idx.getAsLong())
-        : null;
-  }
-
-  /**
-   * @param min the inclusive minimum key value
-   * @param max the inclusive maximum key value
-   * @return a map representing all entries within [{@code} min, {@code} max]
-   */
-  default IDiffSortedMap<K, V> slice(K min, K max) {
-    return slice(min, Bound.INCLUSIVE, max, Bound.INCLUSIVE);
-  }
-
-  default IDiffSortedMap<K, V> slice(K min, Bound minBound, K max, Bound maxBound) {
-    return new Slice.SortedMap<>(this, min, minBound, max, maxBound);
-  }
-
-  default ISortedMap<K, V> sliceIndices(long startIndex, long endIndex) {
-    return keys().sliceIndices(startIndex, endIndex).zip(this);
+            ? nth(idx.getAsLong())
+            : null;
   }
 
   default ISortedMap<K, V> merge(IMap<K, V> b, BinaryOperator<V> mergeFn) {
@@ -138,9 +145,7 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
     return difference(m.keys());
   }
 
-  default ISortedMap<K, V> put(K key, V value, BinaryOperator<V> merge) {
-    return diffSorted().put(key, value, merge);
-  }
+  ISortedMap<K, V> put(K key, V value, BinaryOperator<V> merge);
 
   default ISortedMap<K, V> update(K key, UnaryOperator<V> update) {
     return this.put(key, update.apply(this.get(key, null)));
@@ -150,25 +155,13 @@ public interface ISortedMap<K, V> extends IMap<K, V> {
     return put(key, value, Maps.MERGE_LAST_WRITE_WINS);
   }
 
-  default ISortedMap<K, V> remove(K key) {
-    return diffSorted().remove(key);
-  }
+  ISortedMap<K, V> remove(K key);
 
   default ISortedMap<K, V> forked() {
     return this;
   }
 
-  default ISortedMap<K, V> linear() {
-    return diffSorted().linear();
-  }
-
-  /**
-   * @return a diff wrapper around this collection which preserves the sorting
-   */
-  default IDiffSortedMap<K, V> diffSorted() {
-    ConcatSortedMap<K, V> result = ConcatSortedMap.from(this);
-    return isLinear() ? result.linear() : result;
-  }
+  ISortedMap<K, V> linear();
 
   default IEntry<K, V> first() {
     return nth(0);

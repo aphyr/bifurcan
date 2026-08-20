@@ -1,5 +1,6 @@
 package io.lacuna.bifurcan;
 
+import io.lacuna.bifurcan.ISortedSet.Bound;
 import io.lacuna.bifurcan.nodes.IntMapNodes;
 import io.lacuna.bifurcan.nodes.IntMapNodes.Node;
 import io.lacuna.bifurcan.utils.Iterators;
@@ -16,7 +17,7 @@ import java.util.function.*;
  * characteristics.
  * <p>
  * This collection keeps the keys in sorted order, and can thought of as either a map of integers or a sparse vector.
- * It provides {@link IntMap#slice(Long, Long)}, {@link IntMap#inclusiveFloorIndex(Long)}, and {@link IntMap#ceilIndex(Long)}
+ * It provides {@link IntMap#slice(long, long)}, {@link IntMap#inclusiveFloorIndex(Long)}, and {@link IntMap#ceilIndex(Long)}
  * methods which
  * allow for lookups and filtering on its keys.
  *
@@ -105,10 +106,17 @@ public class IntMap<V> extends ISortedMap.Mixin<Long, V> {
 
   /**
    * @param min the inclusive minimum key value
-   * @param max the inclusive maximum key value
-   * @return a map representing all entries within {@code [min, max]}
+   * @param max the exclusive maximum key value
+   * @return a map representing all entries within {@code [min, max)}
    */
   public IntMap<V> slice(long min, long max) {
+    return slice(min, Bound.INCLUSIVE, max, Bound.EXCLUSIVE);
+  }
+
+  public IntMap<V> slice(long min, Bound minBound, long max, Bound maxBound) {
+    min += minBound == Bound.EXCLUSIVE ? 1 : 0;
+    max += maxBound == Bound.INCLUSIVE ? 1 : 0;
+
     Node<V> negPrime = neg.slice(editor, min, Math.min(-1, max));
     Node<V> posPrime = pos.slice(editor, Math.max(0, min), max);
     return new IntMap<V>(
@@ -116,10 +124,6 @@ public class IntMap<V> extends ISortedMap.Mixin<Long, V> {
         posPrime == null ? Node.POS_EMPTY : posPrime,
         isLinear()
     );
-  }
-
-  public IntMap<V> sliceReal(Long min, Long max) {
-    return slice((long) min, (long) max);
   }
 
   @Override
