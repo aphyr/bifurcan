@@ -15,4 +15,5 @@ benchmarks/data/
 gen-javadoc.sh
 javadoc
 *.iml
+*.swp
 .java-version
