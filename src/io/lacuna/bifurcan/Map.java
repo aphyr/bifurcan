@@ -254,7 +254,8 @@ public class Map<K, V> extends IMap.Mixin<K, V> {
   @Override
   public Map<K, V> difference(IMap<K, ?> m) {
     if (m instanceof Map && Maps.equivEquality(this, m)) {
-      Node<K, V> rootPrime = MapNodes.difference(0, editor, root, ((Map) m).root, equalsFn);
+      Object editorPrime = isLinear() ? editor : new Object();
+      Node<K, V> rootPrime = MapNodes.<K, V>difference(0, editorPrime, root, ((Map) m).root, equalsFn);
       return new Map<>(rootPrime == null ? Node.EMPTY : rootPrime, hashFn, equalsFn, isLinear());
     } else {
       return difference(m.keys());
@@ -264,7 +265,8 @@ public class Map<K, V> extends IMap.Mixin<K, V> {
   @Override
   public Map<K, V> intersection(IMap<K, ?> m) {
     if (m instanceof Map && Maps.equivEquality(this, m)) {
-      Node<K, V> rootPrime = MapNodes.intersection(0, editor, root, ((Map) m).root, equalsFn);
+      Object opEditor = isLinear() ? editor : new Object();
+      Node<K, V> rootPrime = MapNodes.<K, V>intersection(0, opEditor, root, ((Map) m).root, equalsFn);
       return new Map<>(rootPrime == null ? Node.EMPTY : rootPrime, hashFn, equalsFn, isLinear());
     } else {
       return intersection(m.keys());
