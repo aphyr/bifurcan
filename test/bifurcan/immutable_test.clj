@@ -50,7 +50,7 @@
 (def max-program-size
   "How long can programs be? This generator is very bad at shrinking, so when
   debugging you probably want to lower this."
-  4)
+  64)
 
 (def max-basic-size
   "How many elements can we put in a basic collection, like Set.of(1,2,3...)?"
@@ -67,8 +67,9 @@
   fails."
   [type]
   (case type
-    :set :set/empty
-    :map :map/empty))
+    :list :list/empty
+    :set  :set/empty
+    :map  :map/empty))
 
 (defn expr-type
   "Given an expression, and optionally a program, returns the type of an
@@ -79,6 +80,16 @@
   ([expr program]
    (if (vector? expr)
      (case (first expr)
+       (:list/of
+        :list/add-first
+        :list/add-last
+        :list/remove-first
+        :list/remove-last
+        :list/set
+        :list/slice
+        :list/concat)
+       :list
+
        (:map/of
         :map/put
         :map/union
@@ -98,8 +109,9 @@
        (recur (nth program (second expr)) program))
 
      (case expr
-       :map/empty :map
-       :set/empty :set))))
+       :list/empty :list
+       :map/empty  :map
+       :set/empty  :set))))
 
 (defn var-gen
   "Generator of [:var 2 type] expressions. We just pick random numbers, and
@@ -115,6 +127,13 @@
   [type gen]
   (gen/one-of [gen (var-gen type)]))
 
+(def basic-list-gen
+  "Generators of basic list expressions."
+  (gen/one-of
+    [(gen/return :list/empty)
+     (gen/fmap (fn [elements] (into [:list/of] elements))
+               (gen/vector value-gen 1 max-basic-size))]))
+
 (def basic-set-gen
   "Generators of basic set expressions."
   (gen/one-of
@@ -125,8 +144,6 @@
                  (into [:set/of] elements))
                (gen/vector value-gen 1 max-basic-size))]))
 
-(def basic-set-gen+ (or-var :set basic-set-gen))
-
 (def basic-map-gen
   "Generator of basic map expressions."
   (gen/one-of
@@ -136,7 +153,25 @@
                (gen/vector (gen/tuple value-gen value-gen)
                            1 max-basic-size))]))
 
+(def basic-list-gen+ (or-var :list basic-list-gen))
+(def basic-set-gen+ (or-var :set basic-set-gen))
 (def basic-map-gen+ (or-var :map basic-map-gen))
+
+(def composite-list-gen
+  "Generators of composite list expressions like [:list/add [:var 0] 5]"
+  (gen/one-of
+    [(gen/tuple (gen/elements [:list/add-first :list/add-last])
+                basic-list-gen+
+                value-gen)
+     (gen/tuple (gen/elements [:list/remove-first :list/remove-last])
+                basic-list-gen+)
+     (gen/tuple (gen/elements [:list/concat])
+                basic-list-gen+
+                basic-list-gen+)
+     #_(gen/tuple (gen/return :list/slice)
+                basic-list-gen+
+                gen/nat
+                gen/nat)]))
 
 (def composite-set-gen
   "Generators of composite set expressions like [:set/add [:var 2] 3]"
@@ -171,10 +206,9 @@
   "Generator of expressions of the given types."
   [types]
   (->> types
-       (mapcat {:set [basic-set-gen
-                      composite-set-gen]
-                :map [basic-map-gen
-                      composite-map-gen]})
+       (mapcat {:list [basic-list-gen composite-list-gen]
+                :set [basic-set-gen composite-set-gen]
+                :map [basic-map-gen composite-map-gen]})
        vec
        gen/one-of))
 
@@ -248,11 +282,24 @@
   (if (vector? expr)
     (let [[f a b c] expr]
       (case f
+        :list/of           (vec (rest expr))
+        :list/add-first    (vec (cons b a))
+        :list/add-last     (conj a b)
+        :list/remove-first (if (seq a)
+                             (subvec a 1)
+                             [])
+        :list/remove-last  (if (seq a)
+                             (pop a)
+                             [])
+        :list/concat       (into a b)
+        :list/slice        (subvec a b c)
+
         :map/of           (apply hash-map (rest expr))
         :map/put          (assoc a b c)
         :map/union        (merge a b)
         :map/intersection (select-keys a (keys b))
         :map/difference   (reduce dissoc a b)
+
         :set/of           (set (rest expr))
         :set/add          (conj a b)
         :set/remove       (disj a b)
@@ -261,6 +308,7 @@
         :set/difference   (set/difference a b)
         :var              (:res (nth trace a))))
     (case expr
+      :list/empty []
       :map/empty {}
       :set/empty #{}
       expr)))
@@ -272,11 +320,20 @@
   (if (vector? expr)
     (let [[f a b c] expr]
       (case f
+        :list/of           (List/from (rest expr))
+        :list/add-first    (.addFirst a b)
+        :list/add-last     (.addLast a b)
+        :list/remove-first (.removeFirst a)
+        :list/remove-last  (.removeLast a)
+        :list/concat       (.concat a b)
+        :list/slice        (.slice a b c)
+
         :map/of           (Map/from (apply hash-map (rest expr)))
         :map/put          (.put a b c)
         :map/union        (.union a b)
         :map/intersection (.intersection a b)
         :map/difference   (.difference a b)
+
         :set/of           (Set/from (rest expr))
         :set/add          (.add a b)
         :set/remove       (.remove a b)
@@ -285,6 +342,7 @@
         :set/difference   (.difference a b)
         :var              (:res (nth trace a))))
     (case expr
+      :list/empty List/EMPTY
       :map/empty Map/EMPTY
       :set/empty Set/EMPTY
       expr)))
@@ -381,16 +439,18 @@
     {:clj clj
      :bifurcan bifurcan}))
 
-(deftest set-test
-  (checking "Sets are immutable" iterations
-            [program (program-gen [:set])]
-            (let [res (eval-compare program)]
-              (prn)
-              (print-trace (:bifurcan res)))))
+(defmacro def-imm-test
+  "Defines a new test for immutability. Takes a var name, a text description,
+  the number of iterations, and a vector of types."
+  [name desc iterations types]
+  `(deftest ~name
+     (checking ~desc ~iterations
+               [program# (program-gen ~types)]
+               (let [res# (eval-compare program#)]
+                 ; (prn)
+                 ;(print-trace (:bifurcan res#))
+                 ))))
 
-(deftest ^:focus map-test
-  (checking "Maps are immutable" (* iterations 1000)
-            [program (program-gen [:map])]
-            (let [res (eval-compare program)]
-              (prn)
-              (print-trace (:bifurcan res)))))
+(def-imm-test list-test "Lists are immutable" iterations [:list])
+(def-imm-test map-test  "Maps are immutable"  iterations [:map])
+(def-imm-test set-test  "Sets are immutable"  iterations [:set])
