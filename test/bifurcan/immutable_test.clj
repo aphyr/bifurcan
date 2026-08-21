@@ -50,7 +50,7 @@
 (def max-program-size
   "How long can programs be? This generator is very bad at shrinking, so when
   debugging you probably want to lower this."
-  8)
+  4)
 
 (def max-basic-size
   "How many elements can we put in a basic collection, like Set.of(1,2,3...)?"
@@ -62,6 +62,14 @@
   "Generator of basic values."
   gen/large-integer)
 
+(defn fallback-expr
+  "We use these to generate expressions of a given type when rewrite-var
+  fails."
+  [type]
+  (case type
+    :set :set/empty
+    :map :map/empty))
+
 (defn expr-type
   "Given an expression, and optionally a program, returns the type of an
   expression in it. For instance, :set/empty is a :set, as is [:set/union]. The
@@ -71,6 +79,13 @@
   ([expr program]
    (if (vector? expr)
      (case (first expr)
+       (:map/of
+        :map/put
+        :map/union
+        :map/intersection
+        :map/difference)
+       :map
+
        (:set/of
          :set/add
          :set/remove
@@ -83,6 +98,7 @@
        (recur (nth program (second expr)) program))
 
      (case expr
+       :map/empty :map
        :set/empty :set))))
 
 (defn var-gen
@@ -94,45 +110,73 @@
               [:var x type])
             gen/nat))
 
+(defn or-var
+  "Wraps a generator in one that emits variables of the given type."
+  [type gen]
+  (gen/one-of [gen (var-gen type)]))
+
 (def basic-set-gen
   "Generators of basic set expressions."
   (gen/one-of
     [; Empty set
-     (gen/elements [:set/empty])
+     (gen/return :set/empty)
      ; [:set/of 1 2 3]
      (gen/fmap (fn [elements]
                  (into [:set/of] elements))
                (gen/vector value-gen 1 max-basic-size))]))
 
-(defn or-var
-  "Wraps a generator in one that emits variables of the given type."
-  [type gen]
-  (gen/one-of [gen (var-gen type)]))
+(def basic-set-gen+ (or-var :set basic-set-gen))
+
+(def basic-map-gen
+  "Generator of basic map expressions."
+  (gen/one-of
+    [(gen/return :map/empty)
+     (gen/fmap (fn [pairs]
+                 (into [:map/of] (mapcat identity pairs)))
+               (gen/vector (gen/tuple value-gen value-gen)
+                           1 max-basic-size))]))
+
+(def basic-map-gen+ (or-var :map basic-map-gen))
 
 (def composite-set-gen
   "Generators of composite set expressions like [:set/add [:var 2] 3]"
   (gen/one-of
     [(gen/tuple (gen/elements [:set/add
                                :set/remove])
-                (or-var :set basic-set-gen)
+                basic-set-gen+
                 value-gen)
      (gen/tuple (gen/elements [:set/union
                                :set/intersection
                                :set/difference])
-                (or-var :set basic-set-gen)
-                (or-var :set basic-set-gen))]))
+                basic-set-gen+
+                basic-set-gen+)]))
 
-(def expr-gen
-  "Generator of expressions for programs."
-  (gen/one-of [basic-set-gen
-               composite-set-gen]))
+(def composite-map-gen
+  "Generators of composite map expressions like [:map/union [:var 2]
+  :map/empty]"
+  (gen/one-of
+    [(gen/tuple (gen/return :map/put)
+                basic-map-gen+
+                value-gen
+                value-gen)
+     (gen/tuple (gen/elements [:map/union
+                               :map/intersection])
+                basic-map-gen+
+                basic-map-gen+)
+     (gen/tuple (gen/return :map/difference)
+                basic-map-gen+
+                basic-set-gen+)]))
 
-(defn fallback-expr
-  "We use these to generate expressions of a given type when rewrite-var
-  fails."
-  [type]
-  (case type
-    :set :set/empty))
+(defn expr-gen
+  "Generator of expressions of the given types."
+  [types]
+  (->> types
+       (mapcat {:set [basic-set-gen
+                      composite-set-gen]
+                :map [basic-map-gen
+                      composite-map-gen]})
+       vec
+       gen/one-of))
 
 (defn rewrite-var*
   "Given an index of types to vectors of available expression indices, and a
@@ -181,10 +225,11 @@
                         (fn [indices] (conj (or indices []) i)))
                 program))))))
 
-(def program-gen
-  "A generator of abstract programs. Each program is a vector of operations
-  to be performed sequentially. Operations can refer to earlier operations by
-  their index, as if they were all variables in a `let` binding. For example:
+(defn program-gen
+  "A generator of abstract programs. Takes a set of types. Each program is a
+  vector of operations to be performed sequentially, which evaluate to that
+  type. Operations can refer to earlier operations by their index, as if they
+  were all variables in a `let` binding. For example:
 
   [[:set/of 1 2 3]
   [:set/empty]
@@ -192,16 +237,22 @@
 
   This program computes a set containing 1, 2, and 3, then an empty set, then
   takes the union of those two."
- (gen/fmap rewrite-vars
-           (gen/vector expr-gen 1 max-program-size)))
+  [types]
+  (gen/fmap rewrite-vars
+            (gen/vector (expr-gen types) 1 max-program-size)))
 
 (defn eval-expr-clj
   "Takes a trace of program results so far, and evaluates a new expression in
   that context."
   [trace expr]
   (if (vector? expr)
-    (let [[f a b] expr]
+    (let [[f a b c] expr]
       (case f
+        :map/of           (apply hash-map (rest expr))
+        :map/put          (assoc a b c)
+        :map/union        (merge a b)
+        :map/intersection (select-keys a (keys b))
+        :map/difference   (reduce dissoc a b)
         :set/of           (set (rest expr))
         :set/add          (conj a b)
         :set/remove       (disj a b)
@@ -210,6 +261,7 @@
         :set/difference   (set/difference a b)
         :var              (:res (nth trace a))))
     (case expr
+      :map/empty {}
       :set/empty #{}
       expr)))
 
@@ -218,8 +270,13 @@
   that context."
   [trace expr]
   (if (vector? expr)
-    (let [[f a b] expr]
+    (let [[f a b c] expr]
       (case f
+        :map/of           (Map/from (apply hash-map (rest expr)))
+        :map/put          (.put a b c)
+        :map/union        (.union a b)
+        :map/intersection (.intersection a b)
+        :map/difference   (.difference a b)
         :set/of           (Set/from (rest expr))
         :set/add          (.add a b)
         :set/remove       (.remove a b)
@@ -228,6 +285,7 @@
         :set/difference   (.difference a b)
         :var              (:res (nth trace a))))
     (case expr
+      :map/empty Map/EMPTY
       :set/empty Set/EMPTY
       expr)))
 
@@ -298,9 +356,8 @@
                "\nNow:          " (pr-str (datafy res))
                "\nRes:          " res
                "\nSize:         " (.size res)
-               "\niterator-seq: " (pr-str (iterator-seq (.iterator res)))
-               "\nseq:          " (pr-str (seq res))
-               "\nelements:     " (.elements res)
+               "\niterator-seq: " (pr-str (mapv datafy
+                                                (iterator-seq (.iterator res))))
                "\nnths:         " (mapv #(try
                                            (.nth res %)
                                            (catch IndexOutOfBoundsException e
@@ -324,9 +381,16 @@
     {:clj clj
      :bifurcan bifurcan}))
 
-(deftest ^:focus set-test
-  (checking "sets are immutable" iterations
-            [program program-gen]
+(deftest set-test
+  (checking "Sets are immutable" iterations
+            [program (program-gen [:set])]
+            (let [res (eval-compare program)]
+              (prn)
+              (print-trace (:bifurcan res)))))
+
+(deftest ^:focus map-test
+  (checking "Maps are immutable" (* iterations 1000)
+            [program (program-gen [:map])]
             (let [res (eval-compare program)]
               (prn)
               (print-trace (:bifurcan res)))))
