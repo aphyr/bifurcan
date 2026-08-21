@@ -7,7 +7,7 @@
   take a set and union it with another, that union function actually alters its
   arguments."
   (:refer-clojure :exclude [eval])
-  (:require [bifurcan.test-utils :as u :refer [iterations]]
+  (:require [bifurcan.test-utils :as u]
             [clojure [datafy :refer [datafy]]
                      [pprint :refer [pprint]]
                      [set :as set]
@@ -47,6 +47,12 @@
                                LinearSet
                                SortedSet)))
 
+;(set! *warn-on-reflection* true)
+
+(def iterations
+  "Our tests are a lot more expensive, so we run fewer of them."
+  (/ u/iterations 10))
+
 (def max-program-size
   "How long can programs be? This generator is very bad at shrinking, so when
   debugging you probably want to lower this."
@@ -56,7 +62,7 @@
   "How many elements can we put in a basic collection, like Set.of(1,2,3...)?"
   ; TODO: you should raise this when it starts passing; this is just to get
   ; minimal examples
-  8)
+  32)
 
 (def value-gen
   "Generator of basic values."
@@ -195,12 +201,10 @@
                 value-gen
                 value-gen)
      (gen/tuple (gen/elements [:map/union
-                               :map/intersection])
+                               :map/intersection
+                               :map/difference])
                 basic-map-gen+
-                basic-map-gen+)
-     (gen/tuple (gen/return :map/difference)
-                basic-map-gen+
-                basic-set-gen+)]))
+                basic-map-gen+)]))
 
 (defn expr-gen
   "Generator of expressions of the given types."
@@ -298,7 +302,7 @@
         :map/put          (assoc a b c)
         :map/union        (merge a b)
         :map/intersection (select-keys a (keys b))
-        :map/difference   (reduce dissoc a b)
+        :map/difference   (reduce dissoc a (keys b))
 
         :set/of           (set (rest expr))
         :set/add          (conj a b)
@@ -320,26 +324,26 @@
   (if (vector? expr)
     (let [[f a b c] expr]
       (case f
-        :list/of           (List/from (rest expr))
-        :list/add-first    (.addFirst a b)
-        :list/add-last     (.addLast a b)
-        :list/remove-first (.removeFirst a)
-        :list/remove-last  (.removeLast a)
-        :list/concat       (.concat a b)
-        :list/slice        (.slice a b c)
+        :list/of           (List/from ^Iterable (rest expr))
+        :list/add-first    (.addFirst ^IList a b)
+        :list/add-last     (.addLast ^IList a b)
+        :list/remove-first (.removeFirst ^IList a)
+        :list/remove-last  (.removeLast ^IList a)
+        :list/concat       (.concat ^IList a b)
+        :list/slice        (.slice ^IList a b c)
 
-        :map/of           (Map/from (apply hash-map (rest expr)))
-        :map/put          (.put a b c)
-        :map/union        (.union a b)
-        :map/intersection (.intersection a b)
-        :map/difference   (.difference a b)
+        :map/of           (Map/from ^java.util.Map (apply hash-map (rest expr)))
+        :map/put          (.put ^IMap a b c)
+        :map/union        (.union ^IMap a b)
+        :map/intersection (.intersection ^IMap a ^IMap b)
+        :map/difference   (.difference ^IMap a ^IMap b)
 
-        :set/of           (Set/from (rest expr))
-        :set/add          (.add a b)
-        :set/remove       (.remove a b)
-        :set/union        (.union a b)
-        :set/intersection (.intersection a b)
-        :set/difference   (.difference a b)
+        :set/of           (Set/from ^Iterable (rest expr))
+        :set/add          (.add ^ISet a b)
+        :set/remove       (.remove ^ISet a b)
+        :set/union        (.union ^ISet a b)
+        :set/intersection (.intersection ^ISet a b)
+        :set/difference   (.difference ^ISet a b)
         :var              (:res (nth trace a))))
     (case expr
       :list/empty List/EMPTY
@@ -413,15 +417,15 @@
                "\nWas:          " (pr-str clj)
                "\nNow:          " (pr-str (datafy res))
                "\nRes:          " res
-               "\nSize:         " (.size res)
+               "\nSize:         " (.size ^ICollection res)
                "\niterator-seq: " (pr-str (mapv datafy
-                                                (iterator-seq (.iterator res))))
+                                                (iterator-seq (.iterator ^ICollection res))))
                "\nnths:         " (mapv #(try
-                                           (.nth res %)
+                                           (.nth ^ICollection res %)
                                            (catch IndexOutOfBoundsException e
                                              :out-of-bounds))
                                         (range 0 (inc (max (count clj)
-                                                      (.size res)))))
+                                                      (.size ^ICollection res)))))
 
                ))))
      trace)))
@@ -446,6 +450,8 @@
   `(deftest ~name
      (checking ~desc ~iterations
                [program# (program-gen ~types)]
+               ;(print ".")
+               ;(flush)
                (let [res# (eval-compare program#)]
                  ; (prn)
                  ;(print-trace (:bifurcan res#))
@@ -454,3 +460,10 @@
 (def-imm-test list-test "Lists are immutable" iterations [:list])
 (def-imm-test map-test  "Maps are immutable"  iterations [:map])
 (def-imm-test set-test  "Sets are immutable"  iterations [:set])
+
+(deftest iterator-oob-bug
+  ; Test for a specific bug where iterators threw out-of-bounds exceptions
+  (eval-compare
+    [[:set/of 0 -5130]
+     [:set/intersection [:var 0] [:var 0]]
+     [:set/difference [:var 1] [:set/of 0]]]))
