@@ -225,7 +225,7 @@ public class Map<K, V> extends IMap.Mixin<K, V> {
   @Override
   public Map<K, V> merge(IMap<K, V> m, BinaryOperator<V> mergeFn) {
     if (m instanceof Map && Maps.equivEquality(this, m)) {
-      Node<K, V> rootPrime = MapNodes.merge(0, editor, root, ((Map) m).root, equalsFn, mergeFn);
+      Node<K, V> rootPrime = MapNodes.merge(0, new Object(), root, ((Map) m).root, equalsFn, mergeFn);
       return new Map<>(rootPrime, hashFn, equalsFn, isLinear());
     } else {
       return (Map<K, V>) Maps.merge(this.clone(), m, mergeFn);
