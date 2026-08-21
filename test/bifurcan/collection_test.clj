@@ -491,33 +491,28 @@
   (let [m (SortedMap/from {1 :a, 2 :b, 3 :c, 4 :d})]
     (testing "slice"
       (testing "empty"
-        ; Broken: returns entire map somehow?
         (is (map= {} (.slice m 0 0))))
       (testing "single"
-        ; Broken: returns empty map?
-        (is (map= {1 :a} (.slice m 1 1)))
-        (is (map= {4 :d} (.slice m 4 4))))
+        (is (map= {1 :a} (.slice m 1 2)))
+        (is (map= {4 :d} (.slice m 4 5))))
       (testing "middle"
-        ; Broken: returns just 2
-        (is (map= {2 :b, 3 :c} (.slice m 2 3))))
+        (is (map= {2 :b, 3 :c} (.slice m 2 4))))
       (testing "over the edge"
-        ; Broken: returns just 1
-        (is (map= {1 :a, 2 :b} (.slice m 0 2)))
-        ; Broken: returns just 3
-        (is (map= {3 :c, 4 :d} (.slice m 3 8)))))
+        (is (map= {1 :a, 2 :b} (.slice m 0 3)))
+        (is (map= {3 :c, 4 :d} (.slice m 3 9)))))
 
     (testing "sliceIndices"
       (testing "empty"
-        (is (map= {} (.sliceIndices m 4 4))))
+        (is (map= {} (.sliceIndices m 2 2))))
       (testing "single"
-        (is (map= {1 :a} (.sliceIndices m 0 0)))
-        (is (map= {4 :d} (.sliceIndices m 3 3))))
+        (is (map= {1 :a} (.sliceIndices m 0 1)))
+        (is (map= {4 :d} (.sliceIndices m 3 4))))
       (testing "middle"
-        (is (map= {2 :b, 3 :c} (.sliceIndices m 1 2))))
+        (is (map= {2 :b, 3 :c} (.sliceIndices m 1 3))))
       (testing "up to the edge"
         ; Note that sliceIndices throws when given an bounds beyond the min/max
-        (is (map= {1 :a, 2 :b} (.sliceIndices m 0 1)))
-        (is (map= {3 :c, 4 :d} (.sliceIndices m 2 4)))))))
+        (is (map= {1 :a, 2 :b} (.sliceIndices m 0 2)))
+        (is (thrown? IndexOutOfBoundsException (.sliceIndices m 2 5)))))))
 
 (defspec test-sorted-map-slice iterations
   (prop/for-all [start (gen/choose 1 1e4)
