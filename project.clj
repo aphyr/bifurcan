@@ -10,7 +10,9 @@
                    :stress    :stress
                    :all       (constantly true)}
   :profiles {:low-mem {:jvm-opts ^:replace ["-server" "-Xmx1g" "-XX:MaxDirectMemorySize=2g" "-XX:+UseG1GC"]}
-             :bench   {:jvm-opts ^:replace ["-server" "-Xmx10g" "-XX:+UseG1GC"]}
+             :bench   {:jvm-opts ^:replace
+                       ["-server" "-Xmx10g" "-XX:+UseG1GC"
+                        "--add-opens" "java.base/java.lang=ALL-UNNAMED"]}
              :dev     {:dependencies [;; for tests
                                       [org.clojure/clojure "1.10.0"]
                                       [org.clojure/test.check "0.10.0"]
